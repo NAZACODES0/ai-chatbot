@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Chatbot - Gemini</title>
+    <script src="https://cdn.jsdelivr.net/npm/@google/generative-ai"></script>
     <style>
         * {
             margin: 0;
@@ -251,12 +252,34 @@
     </div>
 
     <script>
+        const { GoogleGenerativeAI } = window;
+        
         let apiKey = localStorage.getItem('geminiApiKey') || '';
         let chatHistory = [];
+        let model = null;
+        let chat = null;
 
         if (apiKey) {
+            initializeModel();
             enableChat();
             showStatus('✓ API Key loaded', 'success');
+        }
+
+        function initializeModel() {
+            try {
+                const genAI = new GoogleGenerativeAI(apiKey);
+                model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+                chat = model.startChat({
+                    history: [],
+                    generationConfig: {
+                        maxOutputTokens: 2048,
+                    },
+                });
+                console.log('Model initialized successfully');
+            } catch (error) {
+                console.error('Error initializing model:', error);
+                showStatus('❌ Error initializing model', 'error');
+            }
         }
 
         function saveApiKey() {
@@ -268,8 +291,14 @@
             localStorage.setItem('geminiApiKey', key);
             apiKey = key;
             document.getElementById('apiKey').value = '';
-            enableChat();
-            showStatus('✓ API Key saved successfully', 'success');
+            
+            try {
+                initializeModel();
+                enableChat();
+                showStatus('✓ API Key saved successfully', 'success');
+            } catch (error) {
+                showStatus('❌ Invalid API key', 'error');
+            }
         }
 
         function enableChat() {
@@ -281,11 +310,20 @@
             const status = document.getElementById('status');
             status.textContent = msg;
             status.className = `status ${type}`;
+            console.log('Status:', msg);
         }
 
         function newChat() {
             chatHistory = [];
             document.getElementById('messages').innerHTML = '';
+            if (model) {
+                chat = model.startChat({
+                    history: [],
+                    generationConfig: {
+                        maxOutputTokens: 2048,
+                    },
+                });
+            }
             showStatus('Chat cleared', 'success');
         }
 
@@ -295,8 +333,8 @@
                 showStatus('Please type a message', 'error');
                 return;
             }
-            if (!apiKey) {
-                showStatus('Please add your API key first', 'error');
+            if (!chat) {
+                showStatus('Model not initialized. Please save your API key again.', 'error');
                 return;
             }
 
@@ -304,7 +342,7 @@
 
             // Add user message
             addMessage(input, 'user');
-            chatHistory.push({ role: 'user', content: input });
+            chatHistory.push({ role: 'user', parts: [{ text: input }] });
 
             // Show typing indicator
             const typingId = 'typing-' + Date.now();
@@ -316,49 +354,22 @@
             document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
 
             try {
-                // Build the request exactly as per Google's documentation
-                const contents = chatHistory.map(m => ({
-                    role: m.role === 'user' ? 'user' : 'model',
-                    parts: [{ text: m.content }]
-                }));
+                console.log('Sending message to Gemini...');
+                const result = await chat.sendMessage(input);
+                const response = await result.response;
+                const botMsg = response.text();
 
-                const requestBody = {
-                    contents: contents
-                };
-
-                // Use the correct endpoint with v1beta
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
-                
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(requestBody)
-                });
-
+                console.log('Response received:', botMsg);
                 document.getElementById(typingId)?.remove();
 
-                const data = await response.json();
-
-                if (!response.ok) {
-                    const errorMsg = data.error?.message || 'API Error';
-                    addMessage('❌ ' + errorMsg, 'bot');
-                    return;
-                }
-
-                if (!data.candidates || !data.candidates[0]) {
-                    addMessage('❌ No response received from API', 'bot');
-                    return;
-                }
-
-                const botMsg = data.candidates[0].content.parts[0].text;
                 addMessage(botMsg, 'bot');
-                chatHistory.push({ role: 'bot', content: botMsg });
+                chatHistory.push({ role: 'model', parts: [{ text: botMsg }] });
 
             } catch (error) {
+                console.error('Error:', error);
                 document.getElementById(typingId)?.remove();
                 addMessage('❌ Error: ' + error.message, 'bot');
+                showStatus('Error sending message', 'error');
             }
         }
 
