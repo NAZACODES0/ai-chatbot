@@ -241,7 +241,8 @@
     </div>
 
     <script>
-        const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+        // Updated API URL with correct model name
+        const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent';
         let apiKey = localStorage.getItem('geminiApiKey') || '';
         let chatHistory = [];
 
@@ -311,7 +312,12 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: contents,
-                        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+                        generationConfig: { 
+                            temperature: 0.7, 
+                            maxOutputTokens: 2048,
+                            topP: 0.95,
+                            topK: 40
+                        }
                     })
                 });
 
@@ -324,6 +330,12 @@
                 }
 
                 const data = await response.json();
+                
+                if (!data.candidates || data.candidates.length === 0) {
+                    addMessage('❌ No response from API', 'bot');
+                    return;
+                }
+
                 const botMsg = data.candidates[0].content.parts[0].text;
                 addMessage(botMsg, 'bot');
                 chatHistory.push({ role: 'bot', content: botMsg });
