@@ -70,6 +70,7 @@
             border-radius: 12px;
             word-wrap: break-word;
             line-height: 1.5;
+            font-size: 0.95em;
         }
 
         .message.user .message-content {
@@ -165,7 +166,7 @@
             transition: all 0.3s ease;
         }
 
-        button:hover {
+        button:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
@@ -190,11 +191,16 @@
             border-color: #667eea;
         }
 
+        .chat-input:disabled {
+            background: #f5f5f5;
+        }
+
         .status {
             font-size: 0.9em;
             padding: 8px;
             border-radius: 5px;
             text-align: center;
+            min-height: 20px;
         }
 
         .status.success {
@@ -205,6 +211,10 @@
         .status.error {
             background: #f8d7da;
             color: #721c24;
+        }
+
+        .status.hidden {
+            display: none !important;
         }
     </style>
 </head>
@@ -228,7 +238,7 @@
                 <button onclick="saveApiKey()">Save API Key</button>
                 <button onclick="newChat()">New Chat</button>
             </div>
-            <div id="status" class="status" style="display:none;"></div>
+            <div id="status" class="status hidden"></div>
 
             <textarea 
                 id="userInput" 
@@ -236,19 +246,11 @@
                 class="chat-input"
                 disabled
             ></textarea>
-            <button onclick="sendMessage()" id="sendBtn" disabled>Send</button>
+            <button onclick="sendMessage()" id="sendBtn" disabled>Send Message</button>
         </div>
     </div>
 
     <script>
-        // Try multiple API endpoints
-        const GEMINI_ENDPOINTS = [
-            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-            'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent',
-            'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
-        ];
-        
-        let currentEndpointIndex = 0;
         let apiKey = localStorage.getItem('geminiApiKey') || '';
         let chatHistory = [];
 
@@ -267,7 +269,7 @@
             apiKey = key;
             document.getElementById('apiKey').value = '';
             enableChat();
-            showStatus('✓ API Key saved', 'success');
+            showStatus('✓ API Key saved successfully', 'success');
         }
 
         function enableChat() {
@@ -279,18 +281,24 @@
             const status = document.getElementById('status');
             status.textContent = msg;
             status.className = `status ${type}`;
-            status.style.display = 'block';
-            setTimeout(() => status.style.display = 'none', 3000);
         }
 
         function newChat() {
             chatHistory = [];
             document.getElementById('messages').innerHTML = '';
+            showStatus('Chat cleared', 'success');
         }
 
         async function sendMessage() {
             const input = document.getElementById('userInput').value.trim();
-            if (!input || !apiKey) return;
+            if (!input) {
+                showStatus('Please type a message', 'error');
+                return;
+            }
+            if (!apiKey) {
+                showStatus('Please add your API key first', 'error');
+                return;
+            }
 
             document.getElementById('userInput').value = '';
 
@@ -300,61 +308,47 @@
 
             // Show typing indicator
             const typingId = 'typing-' + Date.now();
-            const msg = document.createElement('div');
-            msg.id = typingId;
-            msg.className = 'message bot';
-            msg.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
-            document.getElementById('messages').appendChild(msg);
+            const typingEl = document.createElement('div');
+            typingEl.id = typingId;
+            typingEl.className = 'message bot';
+            typingEl.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
+            document.getElementById('messages').appendChild(typingEl);
             document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
 
             try {
+                // Build the request exactly as per Google's documentation
                 const contents = chatHistory.map(m => ({
                     role: m.role === 'user' ? 'user' : 'model',
                     parts: [{ text: m.content }]
                 }));
 
-                let response;
-                let lastError;
+                const requestBody = {
+                    contents: contents
+                };
 
-                // Try endpoints in order
-                for (let i = 0; i < GEMINI_ENDPOINTS.length; i++) {
-                    try {
-                        response = await fetch(`${GEMINI_ENDPOINTS[i]}?key=${apiKey}`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                contents: contents,
-                                generationConfig: { 
-                                    temperature: 0.7, 
-                                    maxOutputTokens: 2048,
-                                    topP: 0.95,
-                                    topK: 40
-                                }
-                            })
-                        });
-
-                        if (response.ok) {
-                            break;
-                        } else {
-                            lastError = await response.json();
-                        }
-                    } catch (e) {
-                        lastError = e.message;
-                    }
-                }
+                // Use the correct endpoint with v1beta
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
 
                 document.getElementById(typingId)?.remove();
 
-                if (!response || !response.ok) {
-                    const errorMsg = lastError?.error?.message || lastError?.message || 'API error';
-                    addMessage('❌ Error: ' + errorMsg, 'bot');
+                const data = await response.json();
+
+                if (!response.ok) {
+                    const errorMsg = data.error?.message || 'API Error';
+                    addMessage('❌ ' + errorMsg, 'bot');
                     return;
                 }
 
-                const data = await response.json();
-                
-                if (!data.candidates || data.candidates.length === 0) {
-                    addMessage('❌ No response from API', 'bot');
+                if (!data.candidates || !data.candidates[0]) {
+                    addMessage('❌ No response received from API', 'bot');
                     return;
                 }
 
@@ -369,16 +363,17 @@
         }
 
         function addMessage(text, role) {
-            const msg = document.createElement('div');
-            msg.className = `message ${role}`;
+            const msgEl = document.createElement('div');
+            msgEl.className = `message ${role}`;
             const content = document.createElement('div');
             content.className = 'message-content';
             content.textContent = text;
-            msg.appendChild(content);
-            document.getElementById('messages').appendChild(msg);
+            msgEl.appendChild(content);
+            document.getElementById('messages').appendChild(msgEl);
             document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
         }
 
+        // Enter key to send
         document.getElementById('userInput')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
